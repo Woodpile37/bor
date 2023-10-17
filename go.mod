@@ -69,8 +69,8 @@ require (
 	go.uber.org/goleak v1.1.12
 	golang.org/x/crypto v0.1.0
 	golang.org/x/sync v0.0.0-20220722155255-886fb9371eb4
-	golang.org/x/sys v0.5.0
-	golang.org/x/text v0.7.0
+	golang.org/x/sys v0.0.0-20220728004956-3c1f35247d10
+	golang.org/x/text v0.3.8
 	golang.org/x/time v0.0.0-20210220033141-f8bda1e9f3ba
 	golang.org/x/tools v0.1.12
 	gonum.org/v1/gonum v0.11.0
