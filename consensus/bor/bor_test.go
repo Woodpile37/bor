@@ -23,7 +23,9 @@ func TestGenesisContractChange(t *testing.T) {
 
 	b := &Bor{
 		config: &params.BorConfig{
-			Sprint: 10, // skip sprint transactions in sprint
+			Sprint: map[string]uint64{
+				"0": 10,
+			}, // skip sprint transactions in sprint
 			BlockAlloc: map[string]interface{}{
 				// write as interface since that is how it is decoded in genesis
 				"2": map[string]interface{}{
@@ -49,6 +51,7 @@ func TestGenesisContractChange(t *testing.T) {
 				Code:    []byte{0x1, 0x1},
 			},
 		},
+		Config: &params.ChainConfig{},
 	}
 
 	db := rawdb.NewMemoryDatabase()
@@ -57,8 +60,7 @@ func TestGenesisContractChange(t *testing.T) {
 	statedb, err := state.New(genesis.Root(), state.NewDatabase(db), nil)
 	require.NoError(t, err)
 
-	config := params.ChainConfig{}
-	chain, err := core.NewBlockChain(db, nil, &config, b, vm.Config{}, nil, nil, nil)
+	chain, err := core.NewBlockChain(rawdb.NewMemoryDatabase(), nil, genspec, nil, b, vm.Config{}, nil, nil, nil)
 	require.NoError(t, err)
 
 	addBlock := func(root common.Hash, num int64) (common.Hash, *state.StateDB) {
@@ -66,12 +68,12 @@ func TestGenesisContractChange(t *testing.T) {
 			ParentHash: root,
 			Number:     big.NewInt(num),
 		}
-		b.Finalize(chain, h, statedb, nil, nil)
+		b.Finalize(chain, h, statedb, nil, nil, nil)
 
 		// write state to database
 		root, err := statedb.Commit(false)
 		require.NoError(t, err)
-		require.NoError(t, statedb.Database().TrieDB().Commit(root, true, nil))
+		require.NoError(t, statedb.Database().TrieDB().Commit(root, true))
 
 		statedb, err := state.New(h.Root, state.NewDatabase(db), nil)
 		require.NoError(t, err)
@@ -123,20 +125,20 @@ func TestEncodeSigHeaderJaipur(t *testing.T) {
 	)
 
 	// Jaipur NOT enabled and BaseFee not set
-	hash := SealHash(h, &params.BorConfig{JaipurBlock: 10})
+	hash := SealHash(h, &params.BorConfig{JaipurBlock: big.NewInt(10)})
 	require.Equal(t, hash, hashWithoutBaseFee)
 
 	// Jaipur enabled (Jaipur=0) and BaseFee not set
-	hash = SealHash(h, &params.BorConfig{JaipurBlock: 0})
+	hash = SealHash(h, &params.BorConfig{JaipurBlock: common.Big0})
 	require.Equal(t, hash, hashWithoutBaseFee)
 
 	h.BaseFee = big.NewInt(2)
 
 	// Jaipur enabled (Jaipur=Header block) and BaseFee set
-	hash = SealHash(h, &params.BorConfig{JaipurBlock: 1})
+	hash = SealHash(h, &params.BorConfig{JaipurBlock: common.Big1})
 	require.Equal(t, hash, hashWithBaseFee)
 
 	// Jaipur NOT enabled and BaseFee set
-	hash = SealHash(h, &params.BorConfig{JaipurBlock: 10})
+	hash = SealHash(h, &params.BorConfig{JaipurBlock: big.NewInt(10)})
 	require.Equal(t, hash, hashWithoutBaseFee)
 }

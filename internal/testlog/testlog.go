@@ -77,6 +77,7 @@ func Logger(t *testing.T, level log.Lvl) log.Logger {
 		h:  &bufHandler{fmt: log.TerminalFormat(false)},
 	}
 	l.l.SetHandler(log.LvlFilterHandler(level, l.h))
+
 	return l
 }
 
@@ -143,8 +144,42 @@ func (l *logger) SetHandler(h log.Handler) {
 // flush writes all buffered messages and clears the buffer.
 func (l *logger) flush() {
 	l.t.Helper()
+
 	for _, r := range l.h.buf {
 		l.t.Logf("%s", l.h.fmt.Format(r))
 	}
+
 	l.h.buf = nil
+}
+
+func (l *logger) OnTrace(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlTrace {
+		fn(l.Trace)
+	}
+}
+
+func (l *logger) OnDebug(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlDebug {
+		fn(l.Debug)
+	}
+}
+func (l *logger) OnInfo(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlInfo {
+		fn(l.Info)
+	}
+}
+func (l *logger) OnWarn(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlWarn {
+		fn(l.Warn)
+	}
+}
+func (l *logger) OnError(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlError {
+		fn(l.Error)
+	}
+}
+func (l *logger) OnCrit(fn func(l log.Logging)) {
+	if l.GetHandler().Level() >= log.LvlCrit {
+		fn(l.Crit)
+	}
 }

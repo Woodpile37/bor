@@ -62,7 +62,7 @@ func areDifferentHashes(receipts []map[string]interface{}) bool {
 }
 
 // Test for GetTransactionReceiptsByBlock
-func testGetTransactionReceiptsByBlock(t *testing.T, publicBlockchainAPI *ethapi.PublicBlockChainAPI) {
+func testGetTransactionReceiptsByBlock(t *testing.T, publicBlockchainAPI *ethapi.BlockChainAPI) {
 	// check 1 : zero transactions
 	receiptsOut, err := publicBlockchainAPI.GetTransactionReceiptsByBlock(context.Background(), rpc.BlockNumberOrHashWithNumber(1))
 	if err != nil {
@@ -101,7 +101,7 @@ func testGetTransactionReceiptsByBlock(t *testing.T, publicBlockchainAPI *ethapi
 }
 
 // Test for GetTransactionByBlockNumberAndIndex
-func testGetTransactionByBlockNumberAndIndex(t *testing.T, publicTransactionPoolAPI *ethapi.PublicTransactionPoolAPI) {
+func testGetTransactionByBlockNumberAndIndex(t *testing.T, publicTransactionPoolAPI *ethapi.TransactionAPI) {
 	// check 1 : False ( no transaction )
 	tx := publicTransactionPoolAPI.GetTransactionByBlockNumberAndIndex(context.Background(), rpc.BlockNumber(1), 0)
 	assert.Nil(t, tx)
@@ -138,7 +138,7 @@ func TestAPIs(t *testing.T) {
 	}()
 
 	genesis := core.GenesisBlockForTesting(db, addrr, big.NewInt(1000000))
-	sprint := params.TestChainConfig.Bor.Sprint
+	testBorConfig := params.TestChainConfig.Bor
 
 	chain, receipts := core.GenerateChain(params.TestChainConfig, genesis, ethash.NewFaker(), db, 6, func(i int, gen *core.BlockGen) {
 		switch i {
@@ -208,7 +208,7 @@ func TestAPIs(t *testing.T) {
 
 		blockBatch := db.NewBatch()
 
-		if i%int(sprint-1) != 0 {
+		if i%int(testBorConfig.CalculateSprint(block.NumberU64())-1) != 0 {
 			// if it is not sprint start write all the transactions as normal transactions.
 			rawdb.WriteReceipts(db, block.Hash(), block.NumberU64(), receipts[i])
 		} else {
@@ -249,7 +249,7 @@ func TestAPIs(t *testing.T) {
 
 	// Testing GetTransactionByBlockNumberAndIndex
 	nonceLock := new(ethapi.AddrLocker)
-	publicTransactionPoolAPI := ethapi.NewPublicTransactionPoolAPI(backend.APIBackend, nonceLock)
+	publicTransactionPoolAPI := ethapi.NewTransactionAPI(backend.APIBackend, nonceLock)
 	testGetTransactionByBlockNumberAndIndex(t, publicTransactionPoolAPI)
 
 }

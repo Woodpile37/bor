@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/ethereum/go-ethereum/common"
+	"github.com/ethereum/go-ethereum/consensus/bor/statefull"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/core/vm"
@@ -61,34 +62,44 @@ func (api *API) traceBorBlock(ctx context.Context, block *types.Block, config *T
 	}
 
 	// TODO: discuss consequences of setting preferDisk false.
-	statedb, err := api.backend.StateAtBlock(ctx, parent, reexec, nil, true, false)
+	statedb, release, err := api.backend.StateAtBlock(ctx, parent, reexec, nil, true, false)
 	if err != nil {
 		return nil, err
 	}
 
+	defer release()
+
 	// Execute all the transaction contained within the block concurrently
 	var (
-		signer             = types.MakeSigner(api.backend.ChainConfig(), block.Number())
-		txs                = block.Transactions()
-		deleteEmptyObjects = api.backend.ChainConfig().IsEIP158(block.Number())
+		signer                = types.MakeSigner(api.backend.ChainConfig(), block.Number())
+		txs, stateSyncPresent = api.getAllBlockTransactions(ctx, block)
+		deleteEmptyObjects    = api.backend.ChainConfig().IsEIP158(block.Number())
 	)
 
 	blockCtx := core.NewEVMBlockContext(block.Header(), api.chainContext(ctx), nil)
 
-	traceTxn := func(indx int, tx *types.Transaction) *TxTraceResult {
-		message, _ := tx.AsMessage(signer, block.BaseFee())
+	traceTxn := func(indx int, tx *types.Transaction, borTx bool) *TxTraceResult {
+		message, _ := core.TransactionToMessage(tx, signer, block.BaseFee())
 		txContext := core.NewEVMTxContext(message)
 
 		tracer := logger.NewStructLogger(config.Config)
 
 		// Run the transaction with tracing enabled.
-		vmenv := vm.NewEVM(blockCtx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Debug: true, Tracer: tracer, NoBaseFee: true})
+		vmenv := vm.NewEVM(blockCtx, txContext, statedb, api.backend.ChainConfig(), vm.Config{Tracer: tracer, NoBaseFee: true})
 
 		// Call Prepare to clear out the statedb access list
 		// Not sure if we need to do this
-		statedb.Prepare(tx.Hash(), indx)
+		statedb.SetTxContext(tx.Hash(), indx)
 
-		execRes, err := core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.Gas()))
+		var execRes *core.ExecutionResult
+
+		if borTx {
+			callmsg := prepareCallMessage(*message)
+			execRes, err = statefull.ApplyBorMessage(*vmenv, callmsg)
+		} else {
+			execRes, err = core.ApplyMessage(vmenv, message, new(core.GasPool).AddGas(message.GasLimit), nil)
+		}
+
 		if err != nil {
 			return &TxTraceResult{
 				Error: err.Error(),
@@ -115,7 +126,11 @@ func (api *API) traceBorBlock(ctx context.Context, block *types.Block, config *T
 	}
 
 	for indx, tx := range txs {
-		res.Transactions = append(res.Transactions, traceTxn(indx, tx))
+		if stateSyncPresent && indx == len(txs)-1 {
+			res.Transactions = append(res.Transactions, traceTxn(indx, tx, true))
+		} else {
+			res.Transactions = append(res.Transactions, traceTxn(indx, tx, false))
+		}
 	}
 
 	return res, nil

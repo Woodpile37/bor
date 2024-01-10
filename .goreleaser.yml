@@ -1,7 +1,7 @@
 project_name: bor
 
 release:
-  disable: false
+  disable: true
   draft: true
   prerelease: auto
 
@@ -102,11 +102,6 @@ nfpms:
 
     scripts:
       postinstall: builder/files/bor-post-install.sh
-
-    overrides:
-      rpm:
-        replacements:
-          amd64: x86_64
 
 snapshot:
   name_template: "{{ .Tag }}.next"
