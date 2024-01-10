@@ -605,6 +605,7 @@ func DefaultConfig() *Config {
 		DataDir:                 DefaultDataDir(),
 		Ancient:                 "",
 		DBEngine:                "leveldb",
+		KeyStoreDir:             "",
 		Logging: &LoggingConfig{
 			Vmodule:   "",
 			Json:      false,
@@ -737,7 +738,7 @@ func DefaultConfig() *Config {
 			},
 		},
 		Cache: &CacheConfig{
-			Cache:         1024, // geth's default (suitable for mumbai)
+			Cache:         1024, // geth's default (suitable for mumbai, amoy)
 			PercDatabase:  50,
 			PercTrie:      15,
 			PercGc:        25,

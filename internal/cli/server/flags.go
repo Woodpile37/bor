@@ -15,7 +15,7 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 
 	f.StringFlag(&flagset.StringFlag{
 		Name:    "chain",
-		Usage:   "Name of the chain to sync ('mumbai', 'mainnet') or path to a genesis file",
+		Usage:   "Name of the chain to sync ('amoy', 'mumbai', 'mainnet') or path to a genesis file",
 		Value:   &c.cliConfig.Chain,
 		Default: c.cliConfig.Chain,
 	})
@@ -64,9 +64,10 @@ func (c *Command) Flags(config *Config) *flagset.Flagset {
 		Default: c.cliConfig.DBEngine,
 	})
 	f.StringFlag(&flagset.StringFlag{
-		Name:  "keystore",
-		Usage: "Path of the directory where keystores are located",
-		Value: &c.cliConfig.KeyStoreDir,
+		Name:    "keystore",
+		Usage:   "Path of the directory where keystores are located",
+		Value:   &c.cliConfig.KeyStoreDir,
+		Default: c.cliConfig.KeyStoreDir,
 	})
 	f.Uint64Flag(&flagset.Uint64Flag{
 		Name:    "rpc.batchlimit",
