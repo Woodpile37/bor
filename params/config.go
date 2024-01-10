@@ -566,6 +566,7 @@ type ChainConfig struct {
 	CancunBlock   *big.Int `json:"cancunBlock,omitempty"`   // Cancun switch Block (nil = no fork, 0 = already on cancun)
 	PragueBlock   *big.Int `json:"pragueBlock,omitempty"`   // Prague switch Block (nil = no fork, 0 = already on prague)
 	VerkleBlock   *big.Int `json:"verkleBlock,omitempty"`   // Verkle switch Block (nil = no fork, 0 = already on verkle)
+	NapoliBlock   *big.Int `json:"napoliBlock,omitempty"`   // Napoli switch Block (nil = no fork, 0 = already on Napoli)
 
 	// TerminalTotalDifficulty is the amount of total difficulty reached by
 	// the network that triggers the consensus upgrade.
@@ -890,19 +891,24 @@ func (c *ChainConfig) IsTerminalPoWBlock(parentTotalDiff *big.Int, totalDiff *bi
 	return parentTotalDiff.Cmp(c.TerminalTotalDifficulty) < 0 && totalDiff.Cmp(c.TerminalTotalDifficulty) >= 0
 }
 
-// IsShanghai returns whether time is either equal to the Shanghai fork time or greater.
+// IsShanghai returns whether num is either equal to the Shanghai fork block or greater.
 func (c *ChainConfig) IsShanghai(num *big.Int) bool {
 	return isBlockForked(c.ShanghaiBlock, num)
 }
 
-// IsCancun returns whether num is either equal to the Cancun fork time or greater.
+// IsCancun returns whether num is either equal to the Cancun fork block or greater.
 func (c *ChainConfig) IsCancun(num *big.Int) bool {
 	return isBlockForked(c.CancunBlock, num)
 }
 
-// IsPrague returns whether num is either equal to the Prague fork time or greater.
+// IsPrague returns whether num is either equal to the Prague fork block or greater.
 func (c *ChainConfig) IsPrague(num *big.Int) bool {
 	return isBlockForked(c.PragueBlock, num)
+}
+
+// IsNapoli returns whether num is either equal to the Napoli fork block or greater.
+func (c *ChainConfig) IsNapoli(num *big.Int) bool {
+	return isBlockForked(c.NapoliBlock, num)
 }
 
 // CheckCompatible checks whether scheduled fork transitions have been imported
@@ -1193,7 +1199,7 @@ type Rules struct {
 	IsByzantium, IsConstantinople, IsPetersburg, IsIstanbul bool
 	IsBerlin, IsLondon                                      bool
 	IsMerge, IsShanghai, IsCancun, IsPrague                 bool
-	IsVerkle                                                bool
+	IsVerkle, IsNapoli                                      bool
 }
 
 // Rules ensures c's ChainID is not nil.
@@ -1219,5 +1225,6 @@ func (c *ChainConfig) Rules(num *big.Int, isMerge bool, timestamp uint64) Rules 
 		IsShanghai:       c.IsShanghai(num),
 		IsCancun:         c.IsCancun(num),
 		IsPrague:         c.IsPrague(num),
+		IsNapoli:         c.IsNapoli(num),
 	}
 }
