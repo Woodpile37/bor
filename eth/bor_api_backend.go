@@ -20,6 +20,7 @@ var errBorEngineNotAvailable error = errors.New("Only available in Bor engine")
 // GetRootHash returns root hash for given start and end block
 func (b *EthAPIBackend) GetRootHash(ctx context.Context, starBlockNr uint64, endBlockNr uint64) (string, error) {
 	var api *bor.API
+
 	for _, _api := range b.eth.Engine().APIs(b.eth.BlockChain()) {
 		if _api.Namespace == "bor" {
 			api = _api.Service.(*bor.API)
@@ -52,6 +53,16 @@ func (b *EthAPIBackend) GetVoteOnHash(ctx context.Context, starBlockNr uint64, e
 		return false, errBorEngineNotAvailable
 	}
 
+	//Confirmation of 16 blocks on the endblock
+	tipConfirmationBlockNr := endBlockNr + uint64(16)
+
+	//Check if tipConfirmation block exit
+	_, err := b.BlockByNumber(ctx, rpc.BlockNumber(tipConfirmationBlockNr))
+	if err != nil {
+		return false, errTipConfirmationBlock
+	}
+
+	//Check if end block exist
 	localEndBlock, err := b.BlockByNumber(ctx, rpc.BlockNumber(endBlockNr))
 	if err != nil {
 		return false, errEndBlock
@@ -63,31 +74,16 @@ func (b *EthAPIBackend) GetVoteOnHash(ctx context.Context, starBlockNr uint64, e
 	isLocked := downloader.LockMutex(endBlockNr)
 
 	if !isLocked {
-		downloader.UnlockMutex(false, "", common.Hash{})
+		downloader.UnlockMutex(false, "", endBlockNr, common.Hash{})
 		return false, errors.New("Whitelisted number or locked sprint number is more than the received end block number")
 	}
 
 	if localEndBlockHash != hash {
-		downloader.UnlockMutex(false, "", common.Hash{})
+		downloader.UnlockMutex(false, "", endBlockNr, common.Hash{})
 		return false, fmt.Errorf("Hash mismatch: localChainHash %s, milestoneHash %s", localEndBlockHash, hash)
 	}
 
-	ethHandler := (*ethHandler)(b.eth.handler)
-
-	bor, ok := ethHandler.chain.Engine().(*bor.Bor)
-
-	if !ok {
-		return false, fmt.Errorf("Bor not available")
-	}
-
-	err = bor.HeimdallClient.FetchMilestoneID(ctx, milestoneId)
-
-	if err != nil {
-		downloader.UnlockMutex(false, "", common.Hash{})
-		return false, fmt.Errorf("Milestone ID doesn't exist in Heimdall")
-	}
-
-	downloader.UnlockMutex(true, milestoneId, localEndBlock.Hash())
+	downloader.UnlockMutex(true, milestoneId, endBlockNr, localEndBlock.Hash())
 
 	return true, nil
 }
@@ -108,6 +104,7 @@ func (b *EthAPIBackend) GetBorBlockLogs(ctx context.Context, hash common.Hash) (
 	if receipt == nil {
 		return nil, nil
 	}
+
 	return receipt.Logs, nil
 }
 
