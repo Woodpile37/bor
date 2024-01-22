@@ -119,11 +119,39 @@ func (tx *AccessListTx) accessList() AccessList { return tx.AccessList }
 func (tx *AccessListTx) data() []byte           { return tx.Data }
 func (tx *AccessListTx) gas() uint64            { return tx.Gas }
 func (tx *AccessListTx) gasPrice() *big.Int     { return tx.GasPrice }
-func (tx *AccessListTx) gasTipCap() *big.Int    { return tx.GasPrice }
-func (tx *AccessListTx) gasFeeCap() *big.Int    { return tx.GasPrice }
-func (tx *AccessListTx) value() *big.Int        { return tx.Value }
-func (tx *AccessListTx) nonce() uint64          { return tx.Nonce }
-func (tx *AccessListTx) to() *common.Address    { return tx.To }
+func (tx *AccessListTx) gasPriceU256() *uint256.Int {
+	if tx.gasPriceUint256 != nil {
+		return tx.gasPriceUint256
+	}
+
+	tx.gasPriceUint256, _ = uint256.FromBig(tx.GasPrice)
+
+	return tx.gasPriceUint256
+}
+
+func (tx *AccessListTx) gasTipCap() *big.Int { return tx.GasPrice }
+func (tx *AccessListTx) gasTipCapU256() *uint256.Int {
+	if tx.gasPriceUint256 != nil {
+		return tx.gasPriceUint256
+	}
+
+	tx.gasPriceUint256, _ = uint256.FromBig(tx.GasPrice)
+
+	return tx.gasPriceUint256
+}
+func (tx *AccessListTx) gasFeeCap() *big.Int { return tx.GasPrice }
+func (tx *AccessListTx) gasFeeCapU256() *uint256.Int {
+	if tx.gasPriceUint256 != nil {
+		return tx.gasPriceUint256
+	}
+
+	tx.gasPriceUint256, _ = uint256.FromBig(tx.GasPrice)
+
+	return tx.gasPriceUint256
+}
+func (tx *AccessListTx) value() *big.Int     { return tx.Value }
+func (tx *AccessListTx) nonce() uint64       { return tx.Nonce }
+func (tx *AccessListTx) to() *common.Address { return tx.To }
 
 func (tx *AccessListTx) effectiveGasPrice(dst *big.Int, baseFee *big.Int) *big.Int {
 	return dst.Set(tx.GasPrice)

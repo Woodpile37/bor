@@ -565,6 +565,11 @@ web3._extend({
 			call: 'debug_getTrieFlushInterval',
 			params: 0
 		}),
+		new web3._extend.Method({
+			name: 'getTraceStack',
+			call: 'debug_getTraceStack',
+			params: 0,
+		}),
 	],
 	properties: []
 });
