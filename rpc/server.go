@@ -18,11 +18,10 @@ package rpc
 
 import (
 	"context"
-	"fmt"
 	"io"
-	"sync"
 	"sync/atomic"
-	"time"
+
+	mapset "github.com/deckarep/golang-set"
 
 	"github.com/ethereum/go-ethereum/log"
 )
@@ -47,31 +46,20 @@ const (
 type Server struct {
 	services serviceRegistry
 	idgen    func() ID
+	run      int32
+	codecs   mapset.Set
 
-	mutex  sync.Mutex
-	codecs map[ServerCodec]struct{}
-	run    atomic.Bool
-
-	BatchLimit    uint64
 	executionPool *SafePool
-
-	batchItemLimit     int
-	batchResponseLimit int
 }
 
 // NewServer creates a new server instance with no registered handlers.
-func NewServer(service string, executionPoolSize uint64, executionPoolRequesttimeout time.Duration) *Server {
-	reportEpStats := true
-	if service == "" || service == "test" {
-		reportEpStats = false
-	}
-
+func NewServer() *Server {
 	server := &Server{
 		idgen:         randomIDGenerator(),
-		codecs:        make(map[ServerCodec]struct{}),
-		executionPool: NewExecutionPool(int(executionPoolSize), executionPoolRequesttimeout, service, reportEpStats),
+		codecs:        mapset.NewSet(),
+		run:           1,
+		executionPool: NewExecutionPool(threads),
 	}
-	server.run.Store(true)
 
 	// Register the default service providing meta information about the RPC service such
 	// as the services and methods it offers.
@@ -79,37 +67,6 @@ func NewServer(service string, executionPoolSize uint64, executionPoolRequesttim
 	server.RegisterName(MetadataApi, rpcService)
 
 	return server
-}
-
-func (s *Server) SetRPCBatchLimit(batchLimit uint64) {
-	s.BatchLimit = batchLimit
-}
-
-func (s *Server) SetExecutionPoolSize(n int) {
-	s.executionPool.ChangeSize(n)
-}
-
-func (s *Server) SetExecutionPoolRequestTimeout(n time.Duration) {
-	s.executionPool.ChangeTimeout(n)
-}
-
-func (s *Server) GetExecutionPoolRequestTimeout() time.Duration {
-	return s.executionPool.Timeout()
-}
-
-func (s *Server) GetExecutionPoolSize() int {
-	return s.executionPool.Size()
-}
-
-// SetBatchLimits sets limits applied to batch requests. There are two limits: 'itemLimit'
-// is the maximum number of items in a batch. 'maxResponseSize' is the maximum number of
-// response bytes across all requests in a batch.
-//
-// This method should be called before processing any requests via ServeCodec, ServeHTTP,
-// ServeListener etc.
-func (s *Server) SetBatchLimits(itemLimit, maxResponseSize int) {
-	s.batchItemLimit = itemLimit
-	s.batchResponseLimit = maxResponseSize
 }
 
 // RegisterName creates a service for the given receiver type under the given name. When no
@@ -128,39 +85,18 @@ func (s *Server) RegisterName(name string, receiver interface{}) error {
 func (s *Server) ServeCodec(codec ServerCodec, options CodecOption) {
 	defer codec.close()
 
-	if !s.trackCodec(codec) {
+	// Don't serve if server is stopped.
+	if atomic.LoadInt32(&s.run) == 0 {
 		return
 	}
-	defer s.untrackCodec(codec)
 
-	cfg := &clientConfig{
-		idgen:              s.idgen,
-		batchItemLimit:     s.batchItemLimit,
-		batchResponseLimit: s.batchResponseLimit,
-	}
-	c := initClient(codec, &s.services, cfg)
+	// Add the codec to the set so it can be closed by Stop.
+	s.codecs.Add(codec)
+	defer s.codecs.Remove(codec)
+
+	c := initClient(codec, s.idgen, &s.services)
 	<-codec.closed()
 	c.Close()
-}
-
-func (s *Server) trackCodec(codec ServerCodec) bool {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	if !s.run.Load() {
-		return false // Don't serve if server is stopped.
-	}
-
-	s.codecs[codec] = struct{}{}
-
-	return true
-}
-
-func (s *Server) untrackCodec(codec ServerCodec) {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-
-	delete(s.codecs, codec)
 }
 
 // serveSingleRequest reads and processes a single RPC request from the given codec. This
@@ -168,11 +104,11 @@ func (s *Server) untrackCodec(codec ServerCodec) {
 // this mode.
 func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 	// Don't serve if server is stopped.
-	if !s.run.Load() {
+	if atomic.LoadInt32(&s.run) == 0 {
 		return
 	}
 
-	h := newHandler(ctx, codec, s.idgen, &s.services, s.executionPool, s.batchItemLimit, s.batchResponseLimit)
+	h := newHandler(ctx, codec, s.idgen, &s.services, s.executionPool)
 
 	h.allowSubscribe = false
 	defer h.close(io.EOF, nil)
@@ -180,25 +116,13 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 	reqs, batch, err := codec.readBatch()
 	if err != nil {
 		if err != io.EOF {
-			resp := errorMessage(&invalidMessageError{"parse error"})
-			_ = codec.writeJSON(ctx, resp, true)
+			codec.writeJSON(ctx, errorMessage(&invalidMessageError{"parse error"}))
 		}
-
 		return
 	}
-
 	if batch {
-		if s.BatchLimit > 0 && len(reqs) > int(s.BatchLimit) {
-			if err1 := codec.writeJSON(ctx, errorMessage(fmt.Errorf("batch limit %d exceeded: %d requests given", s.BatchLimit, len(reqs))), true); err1 != nil {
-				log.Warn("WARNING - requests given exceeds the batch limit", "err", err1)
-				log.Debug("batch limit %d exceeded: %d requests given", s.BatchLimit, len(reqs))
-			}
-		} else {
-			//nolint:contextcheck
-			h.handleBatch(reqs)
-		}
+		h.handleBatch(reqs)
 	} else {
-		//nolint:contextcheck
 		h.handleMsg(reqs[0])
 	}
 }
@@ -207,17 +131,12 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec) {
 // requests to finish, then closes all codecs which will cancel pending requests and
 // subscriptions.
 func (s *Server) Stop() {
-	s.mutex.Lock()
-	defer s.mutex.Unlock()
-	// Stop the execution pool
-	s.executionPool.Stop()
-
-	if s.run.CompareAndSwap(true, false) {
+	if atomic.CompareAndSwapInt32(&s.run, 1, 0) {
 		log.Debug("RPC server shutting down")
-
-		for codec := range s.codecs {
-			codec.close()
-		}
+		s.codecs.Each(func(c interface{}) bool {
+			c.(ServerCodec).close()
+			return true
+		})
 	}
 }
 
@@ -236,7 +155,6 @@ func (s *RPCService) Modules() map[string]string {
 	for name := range s.server.services.services {
 		modules[name] = "1.0"
 	}
-
 	return modules
 }
 
@@ -253,7 +171,7 @@ type PeerInfo struct {
 	// Address of client. This will usually contain the IP address and port.
 	RemoteAddr string
 
-	// Additional information for HTTP and WebSocket connections.
+	// Addditional information for HTTP and WebSocket connections.
 	HTTP struct {
 		// Protocol version, i.e. "HTTP/1.1". This is not set for WebSocket.
 		Version string
