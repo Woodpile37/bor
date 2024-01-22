@@ -1,4 +1,3 @@
-// nolint
 package whitelist
 
 import (
@@ -9,8 +8,6 @@ import (
 	"sort"
 	"testing"
 	"time"
-
-	"pgregory.net/rapid"
 
 	"github.com/stretchr/testify/require"
 
@@ -68,7 +65,7 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	require.Equal(t, cp.doExist, true, "expected true as cp exist")
 
 	//Removing the checkpoint
-	s.PurgeWhitelistedCheckpoint()
+	_ = s.PurgeWhitelistedCheckpoint()
 
 	require.Equal(t, cp.doExist, false, "expected false as no cp exist at this point")
 
@@ -85,10 +82,15 @@ func TestWhitelistedCheckpoint(t *testing.T) {
 	require.NotEqual(t, hash, common.Hash{}, "expected the hash to be different from zero hash")
 
 	c1 := s.checkpointService.(*checkpoint)
+
 	fmt.Println("!!!-0", c1.doExist)
-	s.PurgeWhitelistedCheckpoint()
+
+	_ = s.PurgeWhitelistedCheckpoint()
+
 	fmt.Println("!!!-1", c1.doExist)
+
 	doExist, number, hash = s.GetWhitelistedCheckpoint()
+
 	fmt.Println("!!!-2", c1.doExist)
 	//Validating the values received from the db, not memory
 	require.Equal(t, doExist, true, "expected true ascheckpoint exist at this point")
@@ -121,10 +123,11 @@ func TestMilestone(t *testing.T) {
 
 	//Acquiring the mutex lock
 	milestone.LockMutex(11)
+	require.Equal(t, milestone.LockedMilestoneNumber, uint64(11), "expected 11")
 	require.Equal(t, milestone.Locked, false, "expected false as sprint is not locked till this point")
 
 	//Releasing the mutex lock
-	milestone.UnlockMutex(true, "milestoneID1", uint64(11), common.Hash{})
+	milestone.UnlockMutex(true, "milestoneID1", common.Hash{})
 	require.Equal(t, milestone.LockedMilestoneNumber, uint64(11), "expected 11 as it was not initialized")
 	require.Equal(t, milestone.Locked, true, "expected true as sprint is locked now")
 	require.Equal(t, len(milestone.LockedMilestoneIDs), 1, "expected 1 as only 1 milestoneID has been entered")
@@ -136,8 +139,8 @@ func TestMilestone(t *testing.T) {
 	require.False(t, ok, "milestoneID2 shouldn't exist in the LockedMilestoneIDs map")
 
 	milestone.LockMutex(11)
-	milestone.UnlockMutex(true, "milestoneID2", uint64(11), common.Hash{})
-	require.Equal(t, len(milestone.LockedMilestoneIDs), 1, "expected 1 as only 1 milestoneID has been entered")
+	milestone.UnlockMutex(true, "milestoneID2", common.Hash{})
+	require.Equal(t, len(milestone.LockedMilestoneIDs), 2, "expected 1 as only 1 milestoneID has been entered")
 
 	_, ok = milestone.LockedMilestoneIDs["milestoneID2"]
 	require.True(t, ok, "milestoneID2 should exist in the LockedMilestoneIDs map")
@@ -151,16 +154,15 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, milestone.Locked, false, "expected false")
 
 	milestone.LockMutex(11)
-	milestone.UnlockMutex(true, "milestoneID3", uint64(11), common.Hash{})
+	milestone.UnlockMutex(true, "milestoneID3", common.Hash{})
 	require.True(t, milestone.Locked, "expected true")
 	require.Equal(t, milestone.LockedMilestoneNumber, uint64(11), "Expected 11")
 
 	milestone.LockMutex(15)
-	require.True(t, milestone.Locked, "expected true")
-	require.Equal(t, milestone.LockedMilestoneNumber, uint64(11), "Expected 11")
-	milestone.UnlockMutex(true, "milestoneID4", uint64(15), common.Hash{})
+	require.False(t, milestone.Locked, "expected false as till now final confirmation regarding the lock hasn't been made")
+	require.Equal(t, milestone.LockedMilestoneNumber, uint64(15), "Expected 15")
+	milestone.UnlockMutex(true, "milestoneID4", common.Hash{})
 	require.True(t, milestone.Locked, "expected true as final confirmation regarding the lock has been made")
-	require.Equal(t, len(milestone.LockedMilestoneIDs), 1, "expected 1 as previous milestonesIDs has been removed in previous step")
 
 	//Adding the milestone
 	s.ProcessMilestone(11, common.Hash{})
@@ -183,7 +185,7 @@ func TestMilestone(t *testing.T) {
 
 	//Asking the lock for sprintNumber less than last whitelisted milestone
 	require.False(t, milestone.LockMutex(11), "Cant lock the sprintNumber less than equal to latest whitelisted milestone")
-	milestone.UnlockMutex(false, "", uint64(11), common.Hash{}) //Unlock is required after every lock to release the mutex
+	milestone.UnlockMutex(false, "", common.Hash{}) //Unlock is required after every lock to release the mutex
 
 	//Adding the milestone
 	s.ProcessMilestone(51, common.Hash{})
@@ -199,7 +201,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, len(lockedMilestoneIDs), 0, "expected 0 as milestoneID exist in the map")
 
 	//Removing the milestone
-	s.PurgeWhitelistedMilestone()
+	_ = s.PurgeWhitelistedMilestone()
 
 	require.Equal(t, milestone.doExist, false, "expected false as no milestone exist at this point")
 
@@ -213,7 +215,7 @@ func TestMilestone(t *testing.T) {
 	require.Equal(t, number, uint64(11), "expected number to be 11 but got", number)
 	require.Equal(t, hash, common.Hash{1}, "expected the 1 hash but got", hash)
 
-	s.PurgeWhitelistedMilestone()
+	_ = s.PurgeWhitelistedMilestone()
 	doExist, number, hash = s.GetWhitelistedMilestone()
 
 	//Validating the values received from the db, not memory
@@ -443,8 +445,8 @@ func TestIsValidChain(t *testing.T) {
 	chainA := createMockChain(1, 20) // A1->A2...A19->A20
 
 	//Case1: no checkpoint whitelist and no milestone and no locking, should consider the chain as valid
-	res, err := s.IsValidChain(nil, chainA)
-	require.Nil(t, err)
+	res := s.IsValidChain(nil, chainA)
+
 	require.Equal(t, res, true, "Expected chain to be valid")
 
 	tempChain := createMockChain(21, 22) // A21->A22
@@ -456,20 +458,20 @@ func TestIsValidChain(t *testing.T) {
 	zeroChain := make([]*types.Header, 0)
 
 	//Case2: As input chain is of zero length,should consider the chain as invalid
-	res, err = s.IsValidChain(nil, zeroChain)
-	require.Nil(t, err)
+	res = s.IsValidChain(nil, zeroChain)
+
 	require.Equal(t, res, false, "expected chain to be invalid", len(zeroChain))
 
 	//Case3A: As the received chain and current tip of local chain is behind the oldest whitelisted block entry, should consider
 	// the chain as valid
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
+
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	//Case3B: As the received chain is behind the oldest whitelisted block entry,but current tip is at par with whitelisted checkpoint, should consider
 	// the chain as invalid
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
+
 	require.Equal(t, res, false, "expected chain to be invalid ")
 
 	// add mock milestone entry
@@ -477,27 +479,26 @@ func TestIsValidChain(t *testing.T) {
 
 	//Case4A: As the received chain and current tip of local chain is behind the oldest whitelisted block entry, should consider
 	// the chain as valid
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
+
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	//Case4B: As the received chain is behind the oldest whitelisted block entry and but current tip is at par with whitelisted milestine, should consider
 	// the chain as invalid
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
+
 	require.Equal(t, res, false, "expected chain to be invalid")
 
 	//Remove the whitelisted checkpoint
-	s.PurgeWhitelistedCheckpoint()
+	_ = s.PurgeWhitelistedCheckpoint()
 
 	//Case5: As the received chain is still invalid after removing the checkpoint as it is
 	//still behind the whitelisted milestone
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
 	require.Equal(t, res, false, "expected chain to be invalid")
 
 	//Remove the whitelisted milestone
-	s.PurgeWhitelistedMilestone()
+	_ = s.PurgeWhitelistedMilestone()
 
 	//At this stage there is no whitelisted milestone and checkpoint
 
@@ -506,53 +507,50 @@ func TestIsValidChain(t *testing.T) {
 
 	//Locking for sprintNumber 15
 	milestone.LockMutex(chainA[len(chainA)-5].Number.Uint64())
-	milestone.UnlockMutex(true, "MilestoneID1", chainA[len(chainA)-5].Number.Uint64(), chainA[len(chainA)-5].Hash())
+	milestone.UnlockMutex(true, "MilestoneID1", chainA[len(chainA)-5].Hash())
 
 	//Case6: As the received chain is valid as the locked sprintHash matches with the incoming chain.
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
 	require.Equal(t, res, true, "expected chain to be valid as incoming chain matches with the locked value ")
 
 	hash3 := common.Hash{3}
 
 	//Locking for sprintNumber 16 with different hash
 	milestone.LockMutex(chainA[len(chainA)-4].Number.Uint64())
-	milestone.UnlockMutex(true, "MilestoneID2", chainA[len(chainA)-4].Number.Uint64(), hash3)
+	milestone.UnlockMutex(true, "MilestoneID2", hash3)
 
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
+
 	require.Equal(t, res, false, "expected chain to be invalid as incoming chain does match with the locked value hash ")
 
 	//Locking for sprintNumber 19
 	milestone.LockMutex(chainA[len(chainA)-1].Number.Uint64())
-	milestone.UnlockMutex(true, "MilestoneID1", chainA[len(chainA)-1].Number.Uint64(), chainA[len(chainA)-1].Hash())
+	milestone.UnlockMutex(true, "MilestoneID1", chainA[len(chainA)-1].Hash())
 
 	//Case7: As the received chain is valid as the locked sprintHash matches with the incoming chain.
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
+
 	require.Equal(t, res, false, "expected chain to be invalid as incoming chain is less than the locked value ")
 
 	//Locking for sprintNumber 19
 	milestone.LockMutex(uint64(21))
-	milestone.UnlockMutex(true, "MilestoneID1", uint64(21), hash3)
+	milestone.UnlockMutex(true, "MilestoneID1", hash3)
 
 	//Case8: As the received chain is invalid as the locked sprintHash matches is ahead of incoming chain.
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
 	require.Equal(t, res, false, "expected chain to be invalid as incoming chain is less than the locked value ")
 
 	//Unlocking the sprint
 	milestone.UnlockSprint(uint64(21))
 
 	// Clear checkpoint whitelist and add block A15 in whitelist
-	s.PurgeWhitelistedCheckpoint()
+	_ = s.PurgeWhitelistedCheckpoint()
 	s.ProcessCheckpoint(chainA[15].Number.Uint64(), chainA[15].Hash())
 
 	require.Equal(t, checkpoint.doExist, true, "expected true as checkpoint exists.")
 
 	// case9: As the received chain is having valid checkpoint,should consider the chain as valid.
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	// add mock milestone entries
@@ -560,8 +558,7 @@ func TestIsValidChain(t *testing.T) {
 
 	// case10: Try importing a past chain having valid checkpoint, should
 	// consider the chain as invalid as still lastest milestone is ahead of the chain.
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
 	require.Equal(t, res, false, "expected chain to be invalid")
 
 	// add mock milestone entries
@@ -569,8 +566,7 @@ func TestIsValidChain(t *testing.T) {
 
 	// case12: Try importing a chain having valid checkpoint and milestone, should
 	// consider the chain as valid
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
 	require.Equal(t, res, true, "expected chain to be invalid")
 
 	// add mock milestone entries
@@ -578,8 +574,7 @@ func TestIsValidChain(t *testing.T) {
 
 	// case13: Try importing a past chain having valid checkpoint and milestone, should
 	// consider the chain as valid
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	// add mock milestone entries with wrong hash
@@ -587,8 +582,7 @@ func TestIsValidChain(t *testing.T) {
 
 	// case14: Try importing a past chain having valid checkpoint and milestone with wrong hash, should
 	// consider the chain as invalid
-	res, err = s.IsValidChain(chainA[len(chainA)-1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(chainA[len(chainA)-1], chainA)
 	require.Equal(t, res, false, "expected chain to be invalid as hash mismatches")
 
 	// Clear milestone and add blocks A15 in whitelist
@@ -596,54 +590,48 @@ func TestIsValidChain(t *testing.T) {
 
 	// case16: Try importing a past chain having valid checkpoint, should
 	// consider the chain as valid
-	res, err = s.IsValidChain(tempChain[1], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[1], chainA)
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	// Clear checkpoint whitelist and mock blocks in whitelist
 	tempChain = createMockChain(20, 20) // A20
 
-	s.PurgeWhitelistedCheckpoint()
+	_ = s.PurgeWhitelistedCheckpoint()
 	s.ProcessCheckpoint(tempChain[0].Number.Uint64(), tempChain[0].Hash())
 
 	require.Equal(t, checkpoint.doExist, true, "expected true")
 
 	// case17: Try importing a past chain having invalid checkpoint,should consider the chain as invalid
-	res, err = s.IsValidChain(tempChain[0], chainA)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainA)
 	require.Equal(t, res, false, "expected chain to be invalid")
 	// Not checking error here because we return nil in case of checkpoint mismatch
 
 	// case18: Try importing a future chain but within interval, should consider the chain as valid
-	res, err = s.IsValidChain(tempChain[len(tempChain)-1], tempChain)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[len(tempChain)-1], tempChain)
 	require.Equal(t, res, true, "expected chain to be invalid")
 
 	// create a future chain to be imported of length <= `checkpointInterval`
 	chainB := createMockChain(21, 30) // B21->B22...B29->B30
 
 	// case19: Try importing a future chain of acceptable length,should consider the chain as valid
-	res, err = s.IsValidChain(tempChain[0], chainB)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainB)
 	require.Equal(t, res, true, "expected chain to be valid")
 
-	s.PurgeWhitelistedCheckpoint()
-	s.PurgeWhitelistedMilestone()
+	_ = s.PurgeWhitelistedCheckpoint()
+	_ = s.PurgeWhitelistedMilestone()
 
 	chainB = createMockChain(21, 29) // C21->C22....C29
 
 	s.milestoneService.ProcessFutureMilestone(29, chainB[8].Hash())
 
 	// case20: Try importing a future chain which match the future milestone should the chain as valid
-	res, err = s.IsValidChain(tempChain[0], chainB)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainB)
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	chainB = createMockChain(21, 27) // C21->C22...C39->C40...C->256
 
 	// case21: Try importing a chain whose end point is less than future milestone
-	res, err = s.IsValidChain(tempChain[0], chainB)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainB)
 	require.Equal(t, res, true, "expected chain to be valid")
 
 	chainB = createMockChain(30, 39) // C21->C22...C39->C40...C->256
@@ -652,265 +640,15 @@ func TestIsValidChain(t *testing.T) {
 	s.milestoneService.ProcessFutureMilestone(38, chainB[9].Hash())
 
 	// case22: Try importing a future chain with mismatch future milestone
-	res, err = s.IsValidChain(tempChain[0], chainB)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainB)
 	require.Equal(t, res, false, "expected chain to be invalid")
 
 	chainB = createMockChain(40, 49) // C40->C41...C48->C49
 
 	// case23: Try importing a future chain whose starting point is ahead of latest future milestone
-	res, err = s.IsValidChain(tempChain[0], chainB)
-	require.Nil(t, err)
+	res = s.IsValidChain(tempChain[0], chainB)
 	require.Equal(t, res, true, "expected chain to be invalid")
 
-}
-
-func TestPropertyBasedTestingMilestone(t *testing.T) {
-	rapid.Check(t, func(t *rapid.T) {
-
-		db := rawdb.NewMemoryDatabase()
-
-		milestone := milestone{
-			finality: finality[*rawdb.Milestone]{
-				doExist:  false,
-				Number:   0,
-				Hash:     common.Hash{},
-				interval: 256,
-				db:       db,
-			},
-
-			Locked:                false,
-			LockedMilestoneNumber: 0,
-			LockedMilestoneHash:   common.Hash{},
-			LockedMilestoneIDs:    make(map[string]struct{}),
-			FutureMilestoneList:   make(map[uint64]common.Hash),
-			FutureMilestoneOrder:  make([]uint64, 0),
-			MaxCapacity:           10,
-		}
-
-		var (
-			milestoneEndNum = rapid.Uint64().Draw(t, "endBlock")
-			milestoneID     = rapid.String().Draw(t, "MilestoneID")
-			doLock          = rapid.Bool().Draw(t, "Voted")
-		)
-
-		val := milestone.LockMutex(milestoneEndNum.(uint64))
-		if !val {
-			t.Error("LockMutex need to return true when there is no whitelisted milestone and locked milestone")
-		}
-
-		milestone.UnlockMutex(doLock.(bool), milestoneID.(string), milestoneEndNum.(uint64), common.Hash{})
-
-		if doLock.(bool) {
-			//Milestone should not be whitelisted
-			if milestone.doExist {
-				t.Error("Milestone is not expected to be whitelisted")
-			}
-
-			//Local chain should be locked
-			if !milestone.Locked {
-				t.Error("Milestone is expected to be locked at", milestoneEndNum.(uint64))
-			}
-
-			if milestone.LockedMilestoneNumber != milestoneEndNum.(uint64) {
-				t.Error("Locked milestone number is expected to be", milestoneEndNum.(uint64))
-			}
-
-			if len(milestone.LockedMilestoneIDs) != 1 {
-				t.Error("List should contain 1 milestone")
-			}
-
-			_, ok := milestone.LockedMilestoneIDs[milestoneID.(string)]
-
-			if !ok {
-				t.Error("List doesn't contain correct milestoneID")
-			}
-		}
-
-		if !doLock.(bool) {
-			if milestone.doExist {
-				t.Error("Milestone is not expected to be whitelisted")
-			}
-
-			if milestone.Locked {
-				t.Error("Milestone is expected not to be locked")
-			}
-
-			if milestone.LockedMilestoneNumber != 0 {
-				t.Error("Locked milestone number is expected to be", 0)
-			}
-
-			if len(milestone.LockedMilestoneIDs) != 0 {
-				t.Error("List should not contain milestone")
-			}
-
-			_, ok := milestone.LockedMilestoneIDs[milestoneID.(string)]
-
-			if ok {
-				t.Error("List shouldn't contain any milestoneID")
-			}
-		}
-
-		fitlerFn := func(i uint64) bool {
-			if i <= uint64(1000) {
-				return true
-			}
-
-			return false
-		}
-
-		var (
-			start = rapid.Uint64Max(milestoneEndNum.(uint64)).Draw(t, "start for mock chain")
-			end   = rapid.Uint64Min(start.(uint64)).Filter(fitlerFn).Draw(t, "end for mock chain")
-		)
-
-		chainTemp := createMockChain(start.(uint64), end.(uint64))
-
-		val, err := milestone.IsValidChain(chainTemp[0], chainTemp)
-		if err != nil {
-			t.Error("Error", err)
-		}
-
-		if doLock.(bool) && val {
-			t.Error("When the chain is locked at milestone, it should not pass IsValidChain for incompatible incoming chain")
-		}
-
-		if !doLock.(bool) && !val {
-			t.Error("When the chain is not locked at milestone, it should pass IsValidChain for incoming chain")
-		}
-
-		var (
-			milestoneEndNum2 = rapid.Uint64().Draw(t, "endBlockNum 2")
-			milestoneID2     = rapid.String().Draw(t, "MilestoneID 2")
-			doLock2          = rapid.Bool().Draw(t, "Voted 2")
-		)
-
-		val = milestone.LockMutex(milestoneEndNum2.(uint64))
-
-		if doLock.(bool) && milestoneEndNum.(uint64) > milestoneEndNum2.(uint64) && val {
-			t.Error("LockMutex need to return false as previous locked milestone is greater")
-		}
-
-		if doLock.(bool) && milestoneEndNum.(uint64) <= milestoneEndNum2.(uint64) && !val {
-			t.Error("LockMutex need to return true as previous locked milestone is less")
-		}
-
-		milestone.UnlockMutex(doLock2.(bool), milestoneID2.(string), milestoneEndNum2.(uint64), common.Hash{})
-
-		if doLock2.(bool) {
-			if milestone.doExist {
-				t.Error("Milestone is not expected to be whitelisted")
-			}
-
-			if !milestone.Locked {
-				t.Error("Milestone is expected to be locked at", milestoneEndNum2.(uint64))
-			}
-
-			if milestone.LockedMilestoneNumber != milestoneEndNum2.(uint64) {
-				t.Error("Locked milestone number is expected to be", milestoneEndNum.(uint64))
-			}
-
-			if len(milestone.LockedMilestoneIDs) != 1 {
-				t.Error("List should contain 1 milestone")
-			}
-
-			_, ok := milestone.LockedMilestoneIDs[milestoneID2.(string)]
-
-			if !ok {
-				t.Error("List doesn't contain correct milestoneID")
-			}
-		}
-
-		if !doLock2.(bool) {
-			if milestone.doExist {
-				t.Error("Milestone is not expected to be whitelisted")
-			}
-
-			if !doLock.(bool) && milestone.Locked {
-				t.Error("Milestone is expected not to be locked")
-			}
-
-			if doLock.(bool) && !milestone.Locked {
-				t.Error("Milestone is expected to be locked at", milestoneEndNum.(uint64))
-			}
-
-			if !doLock.(bool) && milestone.LockedMilestoneNumber != 0 {
-				t.Error("Locked milestone number is expected to be", 0)
-			}
-
-			if doLock.(bool) && milestone.LockedMilestoneNumber != milestoneEndNum.(uint64) {
-				t.Error("Locked milestone number is expected to be", milestoneEndNum.(uint64))
-			}
-
-			if !doLock.(bool) && len(milestone.LockedMilestoneIDs) != 0 {
-				t.Error("List should not contain milestone")
-			}
-
-			if doLock.(bool) && len(milestone.LockedMilestoneIDs) != 1 {
-				t.Error("List should not contain milestone")
-			}
-
-			_, ok := milestone.LockedMilestoneIDs[milestoneID.(string)]
-
-			if !doLock.(bool) && ok {
-				t.Error("List shouldn't contain any milestoneID")
-			}
-
-			if doLock.(bool) && !ok {
-				t.Error("List should contain milestoneID")
-			}
-		}
-
-		var (
-			milestoneNum = rapid.Uint64().Draw(t, "milestone Number")
-		)
-
-		lockedValue := milestone.LockedMilestoneNumber
-
-		milestone.Process(milestoneNum.(uint64), common.Hash{})
-
-		isChainLocked := doLock.(bool) || doLock2.(bool)
-
-		if !milestone.doExist {
-			t.Error("Should have the whitelisted milestone")
-		}
-
-		if milestone.finality.Number != milestoneNum.(uint64) {
-			t.Error("Should have the whitelisted milestone", milestoneNum.(uint64))
-		}
-
-		if isChainLocked {
-			if milestoneNum.(uint64) < lockedValue {
-				if !milestone.Locked {
-					t.Error("Milestone is expected to be locked")
-				}
-			} else {
-				if milestone.Locked {
-					t.Error("Milestone is expected not to be locked")
-				}
-			}
-		}
-
-		var (
-			futureMilestoneNum = rapid.Uint64Min(milestoneNum.(uint64)).Draw(t, "future milestone Number")
-		)
-
-		isChainLocked = milestone.Locked
-
-		milestone.ProcessFutureMilestone(futureMilestoneNum.(uint64), common.Hash{})
-
-		if isChainLocked {
-			if futureMilestoneNum.(uint64) < lockedValue {
-				if !milestone.Locked {
-					t.Error("Milestone is expected to be locked")
-				}
-			} else {
-				if milestone.Locked {
-					t.Error("Milestone is expected not to be locked")
-				}
-			}
-		}
-	})
 }
 
 func TestSplitChain(t *testing.T) {
@@ -945,7 +683,6 @@ func TestSplitChain(t *testing.T) {
 		tc := tc
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-
 			past, future := splitChain(tc.current, tc.chain)
 			require.Equal(t, len(past), tc.result.pastLength)
 			require.Equal(t, len(future), tc.result.futureLength)

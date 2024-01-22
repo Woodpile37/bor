@@ -28,7 +28,6 @@ import (
 	"github.com/ethereum/go-ethereum/consensus"
 	"github.com/ethereum/go-ethereum/core"
 	"github.com/ethereum/go-ethereum/core/state"
-	"github.com/ethereum/go-ethereum/core/txpool"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/eth/downloader"
 	"github.com/ethereum/go-ethereum/event"
@@ -40,69 +39,50 @@ import (
 // to offer all the functions here.
 type Backend interface {
 	BlockChain() *core.BlockChain
-	TxPool() *txpool.TxPool
-	PeerCount() int
+	TxPool() *core.TxPool
+	StateAtBlock(block *types.Block, reexec uint64, base *state.StateDB, checkLive bool, preferDisk bool) (statedb *state.StateDB, err error)
 }
 
 // Config is the configuration parameters of mining.
 type Config struct {
-	Etherbase           common.Address `toml:",omitempty"` // Public address for block mining rewards
-	ExtraData           hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
-	GasFloor            uint64         // Target gas floor for mined blocks.
-	GasCeil             uint64         // Target gas ceiling for mined blocks.
-	GasPrice            *big.Int       // Minimum gas price for mining a transaction
-	Recommit            time.Duration  // The time interval for miner to re-create mining work.
-	CommitInterruptFlag bool           // Interrupt commit when time is up ( default = true)
-
-	NewPayloadTimeout time.Duration // The maximum time allowance for creating a new payload
-}
-
-// DefaultConfig contains default settings for miner.
-var DefaultConfig = Config{
-	GasCeil:  30000000,
-	GasPrice: big.NewInt(params.GWei),
-
-	// The default recommit time is chosen as two seconds since
-	// consensus-layer usually will wait a half slot of time(6s)
-	// for payload generation. It should be enough for Geth to
-	// run 3 rounds.
-	Recommit:          2 * time.Second,
-	NewPayloadTimeout: 2 * time.Second,
+	Etherbase  common.Address `toml:",omitempty"` // Public address for block mining rewards (default = first account)
+	Notify     []string       `toml:",omitempty"` // HTTP URL list to be notified of new work packages (only useful in ethash).
+	NotifyFull bool           `toml:",omitempty"` // Notify with pending block headers instead of work packages
+	ExtraData  hexutil.Bytes  `toml:",omitempty"` // Block extra data set by the miner
+	GasFloor   uint64         // Target gas floor for mined blocks.
+	GasCeil    uint64         // Target gas ceiling for mined blocks.
+	GasPrice   *big.Int       // Minimum gas price for mining a transaction
+	Recommit   time.Duration  // The time interval for miner to re-create mining work.
+	Noverify   bool           // Disable remote mining solution verification(only useful in ethash).
 }
 
 // Miner creates blocks and searches for proof-of-work values.
-// nolint:staticcheck
 type Miner struct {
-	mux     *event.TypeMux
-	eth     Backend
-	engine  consensus.Engine
-	exitCh  chan struct{}
-	startCh chan struct{}
-	stopCh  chan chan struct{}
-	worker  *worker
+	mux      *event.TypeMux
+	worker   *worker
+	coinbase common.Address
+	eth      Backend
+	engine   consensus.Engine
+	exitCh   chan struct{}
+	startCh  chan common.Address
+	stopCh   chan chan struct{}
 
 	wg sync.WaitGroup
 }
 
 func New(eth Backend, config *Config, chainConfig *params.ChainConfig, mux *event.TypeMux, engine consensus.Engine, isLocalBlock func(header *types.Header) bool) *Miner {
 	miner := &Miner{
-		mux:     mux,
 		eth:     eth,
+		mux:     mux,
 		engine:  engine,
 		exitCh:  make(chan struct{}),
+		startCh: make(chan common.Address),
 		stopCh:  make(chan chan struct{}),
-		startCh: make(chan struct{}),
 		worker:  newWorker(config, chainConfig, engine, eth, mux, isLocalBlock, true),
 	}
 	miner.wg.Add(1)
-
 	go miner.update()
-
 	return miner
-}
-
-func (miner *Miner) GetWorker() *worker {
-	return miner.worker
 }
 
 // update keeps track of the downloader events. Please be aware that this is a one shot type of update loop.
@@ -122,7 +102,6 @@ func (miner *Miner) update() {
 	shouldStart := false
 	canStart := true
 	dlEventCh := events.Chan()
-
 	for {
 		select {
 		case ev := <-dlEventCh:
@@ -131,50 +110,39 @@ func (miner *Miner) update() {
 				dlEventCh = nil
 				continue
 			}
-
 			switch ev.Data.(type) {
 			case downloader.StartEvent:
 				wasMining := miner.Mining()
 				miner.worker.stop()
-
 				canStart = false
-
 				if wasMining {
 					// Resume mining after sync was finished
 					shouldStart = true
-
 					log.Info("Mining aborted due to sync")
 				}
-				miner.worker.syncing.Store(true)
-
 			case downloader.FailedEvent:
 				canStart = true
-
 				if shouldStart {
+					miner.SetEtherbase(miner.coinbase)
 					miner.worker.start()
 				}
-				miner.worker.syncing.Store(false)
-
 			case downloader.DoneEvent:
 				canStart = true
-
 				if shouldStart {
+					miner.SetEtherbase(miner.coinbase)
 					miner.worker.start()
 				}
-				miner.worker.syncing.Store(false)
-
 				// Stop reacting to downloader events
 				events.Unsubscribe()
 			}
-		case <-miner.startCh:
+		case addr := <-miner.startCh:
+			miner.SetEtherbase(addr)
 			if canStart {
 				miner.worker.start()
 			}
-
 			shouldStart = true
 		case ch := <-miner.stopCh:
 			shouldStart = false
-
 			miner.worker.stop()
 			close(ch)
 		case <-miner.exitCh:
@@ -184,8 +152,8 @@ func (miner *Miner) update() {
 	}
 }
 
-func (miner *Miner) Start() {
-	miner.startCh <- struct{}{}
+func (miner *Miner) Start(coinbase common.Address) {
+	miner.startCh <- coinbase
 }
 
 func (miner *Miner) Stop(ch chan struct{}) {
@@ -198,14 +166,13 @@ func (miner *Miner) Close() {
 }
 
 func (miner *Miner) Mining() bool {
-	return miner.worker.IsRunning()
+	return miner.worker.isRunning()
 }
 
 func (miner *Miner) Hashrate() uint64 {
 	if pow, ok := miner.engine.(consensus.PoW); ok {
 		return uint64(pow.Hashrate())
 	}
-
 	return 0
 }
 
@@ -213,9 +180,7 @@ func (miner *Miner) SetExtra(extra []byte) error {
 	if uint64(len(extra)) > params.MaximumExtraDataSize {
 		return fmt.Errorf("extra exceeds max length. %d > %v", len(extra), params.MaximumExtraDataSize)
 	}
-
 	miner.worker.setExtra(extra)
-
 	return nil
 }
 
@@ -224,14 +189,12 @@ func (miner *Miner) SetRecommitInterval(interval time.Duration) {
 	miner.worker.setRecommitInterval(interval)
 }
 
-// Pending returns the currently pending block and associated state. The returned
-// values can be nil in case the pending block is not initialized
+// Pending returns the currently pending block and associated state.
 func (miner *Miner) Pending() (*types.Block, *state.StateDB) {
 	return miner.worker.pending()
 }
 
-// PendingBlock returns the currently pending block. The returned block can be
-// nil in case the pending block is not initialized.
+// PendingBlock returns the currently pending block.
 //
 // Note, to access both the pending block and the pending state
 // simultaneously, please use Pending(), as the pending state can
@@ -241,12 +204,12 @@ func (miner *Miner) PendingBlock() *types.Block {
 }
 
 // PendingBlockAndReceipts returns the currently pending block and corresponding receipts.
-// The returned values can be nil in case the pending block is not initialized.
 func (miner *Miner) PendingBlockAndReceipts() (*types.Block, types.Receipts) {
 	return miner.worker.pendingBlockAndReceipts()
 }
 
 func (miner *Miner) SetEtherbase(addr common.Address) {
+	miner.coinbase = addr
 	miner.worker.setEtherbase(addr)
 }
 
@@ -256,13 +219,31 @@ func (miner *Miner) SetGasCeil(ceil uint64) {
 	miner.worker.setGasCeil(ceil)
 }
 
+// EnablePreseal turns on the preseal mining feature. It's enabled by default.
+// Note this function shouldn't be exposed to API, it's unnecessary for users
+// (miners) to actually know the underlying detail. It's only for outside project
+// which uses this library.
+func (miner *Miner) EnablePreseal() {
+	miner.worker.enablePreseal()
+}
+
+// DisablePreseal turns off the preseal mining feature. It's necessary for some
+// fake consensus engine which can seal blocks instantaneously.
+// Note this function shouldn't be exposed to API, it's unnecessary for users
+// (miners) to actually know the underlying detail. It's only for outside project
+// which uses this library.
+func (miner *Miner) DisablePreseal() {
+	miner.worker.disablePreseal()
+}
+
+// GetSealingBlock retrieves a sealing block based on the given parameters.
+// The returned block is not sealed but all other fields should be filled.
+func (miner *Miner) GetSealingBlock(parent common.Hash, timestamp uint64, coinbase common.Address, random common.Hash) (*types.Block, error) {
+	return miner.worker.getSealingBlock(parent, timestamp, coinbase, random)
+}
+
 // SubscribePendingLogs starts delivering logs from pending transactions
 // to the given channel.
 func (miner *Miner) SubscribePendingLogs(ch chan<- []*types.Log) event.Subscription {
 	return miner.worker.pendingLogsFeed.Subscribe(ch)
-}
-
-// BuildPayload builds the payload according to the provided parameters.
-func (miner *Miner) BuildPayload(args *BuildPayloadArgs) (*Payload, error) {
-	return miner.worker.buildPayload(args)
 }

@@ -28,7 +28,7 @@ type milestoneService interface {
 	GetMilestoneIDsList() []string
 	RemoveMilestoneID(milestoneId string)
 	LockMutex(endBlockNum uint64) bool
-	UnlockMutex(doLock bool, milestoneId string, endBlockNum uint64, endBlockHash common.Hash)
+	UnlockMutex(doLock bool, milestoneId string, endBlockHash common.Hash)
 	UnlockSprint(endBlockNum uint64)
 	ProcessFutureMilestone(num uint64, hash common.Hash)
 }
@@ -52,10 +52,10 @@ var (
 
 // IsValidChain checks the validity of chain by comparing it
 // against the local milestone entries
-func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Header) (bool, error) {
+func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Header) bool {
 	//Checking for the milestone flag
 	if !flags.Milestone {
-		return true, nil
+		return true
 	}
 
 	m.finality.RLock()
@@ -71,26 +71,25 @@ func (m *milestone) IsValidChain(currentHeader *types.Header, chain []*types.Hea
 		}
 	}()
 
-	res, err := m.finality.IsValidChain(currentHeader, chain)
+	res := m.finality.IsValidChain(currentHeader, chain)
 
 	if !res {
 		isValid = false
-		return isValid, err
+		return isValid
 	}
 
 	if m.Locked && !m.IsReorgAllowed(chain, m.LockedMilestoneNumber, m.LockedMilestoneHash) {
 		isValid = false
-		return isValid, nil
+		return isValid
 	}
 
 	if !m.IsFutureMilestoneCompatible(chain) {
 		isValid = false
-		return isValid, nil
+		return isValid
 	}
 
 	isValid = true
-
-	return isValid, nil
+	return isValid
 }
 
 // IsValidPeer checks if the chain we're about to receive from a peer is valid or not
@@ -131,33 +130,37 @@ func (m *milestone) Process(block uint64, hash common.Hash) {
 }
 
 // This function will Lock the mutex at the time of voting
-// fixme: get rid of it
 func (m *milestone) LockMutex(endBlockNum uint64) bool {
 	m.finality.Lock()
 
 	if m.doExist && endBlockNum <= m.Number { //if endNum is less than whitelisted milestone, then we won't lock the sprint
 		log.Debug("endBlockNumber is less than or equal to latesMilestoneNumber", "endBlock Number", endBlockNum, "LatestMilestone Number", m.Number)
+
 		return false
 	}
 
-	if m.Locked && endBlockNum < m.LockedMilestoneNumber {
-		log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
-		return false
+	if m.Locked && endBlockNum != m.LockedMilestoneNumber {
+		if endBlockNum < m.LockedMilestoneNumber {
+			log.Debug("endBlockNum is less than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
+			return false
+		}
+
+		log.Debug("endBlockNum is more than locked milestone number", "endBlock Number", endBlockNum, "Locked Milestone Number", m.LockedMilestoneNumber)
+		m.UnlockSprint(m.LockedMilestoneNumber)
+		m.Locked = false
 	}
+
+	m.LockedMilestoneNumber = endBlockNum
 
 	return true
 }
 
 // This function will unlock the mutex locked in LockMutex
-// fixme: get rid of it
-func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockNum uint64, endBlockHash common.Hash) {
+func (m *milestone) UnlockMutex(doLock bool, milestoneId string, endBlockHash common.Hash) {
 	m.Locked = m.Locked || doLock
 
 	if doLock {
-		m.UnlockSprint(m.LockedMilestoneNumber)
-		m.Locked = true
 		m.LockedMilestoneHash = endBlockHash
-		m.LockedMilestoneNumber = endBlockNum
 		m.LockedMilestoneIDs[milestoneId] = struct{}{}
 	}
 
@@ -267,19 +270,6 @@ func (m *milestone) IsFutureMilestoneCompatible(chain []*types.Header) bool {
 func (m *milestone) ProcessFutureMilestone(num uint64, hash common.Hash) {
 	if len(m.FutureMilestoneOrder) < m.MaxCapacity {
 		m.enqueueFutureMilestone(num, hash)
-	}
-
-	if num < m.LockedMilestoneNumber {
-		return
-	}
-
-	m.Locked = false
-	m.purgeMilestoneIDsList()
-
-	err := rawdb.WriteLockField(m.db, m.Locked, m.LockedMilestoneNumber, m.LockedMilestoneHash, m.LockedMilestoneIDs)
-
-	if err != nil {
-		log.Error("Error in writing lock data of milestone to db", "err", err)
 	}
 }
 

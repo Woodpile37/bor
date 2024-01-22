@@ -27,12 +27,6 @@ var (
 	// errEndBlock is returned when we're unable to fetch a block locally.
 	errEndBlock = errors.New("failed to get end block")
 
-	// errEndBlock is returned when we're unable to fetch a block locally.
-	errTipConfirmationBlock = errors.New("failed to get tip confirmation block")
-
-	// errBlockNumberConversion is returned when we get err in parsing hexautil block number
-	errBlockNumberConversion = errors.New("failed to parse the block number")
-
 	//Metrics for collecting the rewindLength
 	rewindLengthMeter = metrics.NewRegisteredMeter("chain/autorewind/length", nil)
 )
@@ -58,7 +52,7 @@ func borVerify(ctx context.Context, eth *Ethereum, handler *ethHandler, start ui
 		return hash, errMissingBlocks
 	}
 
-	head := currentBlock.Number.Uint64()
+	head := currentBlock.Number().Uint64()
 
 	if head < end {
 		log.Debug(fmt.Sprintf("Current head block behind incoming %s block", str), "head", head, "end block", end)
@@ -121,12 +115,6 @@ func borVerify(ctx context.Context, eth *Ethereum, handler *ethHandler, start ui
 			rewindTo = head - 255
 		}
 
-		if isCheckpoint {
-			log.Warn("Rewinding chain due to checkpoint root hash mismatch", "number", rewindTo)
-		} else {
-			log.Warn("Rewinding chain due to milestone endblock hash mismatch", "number", rewindTo)
-		}
-
 		rewindBack(eth, head, rewindTo)
 
 		return hash, errHashMismatch
@@ -153,13 +141,14 @@ func rewindBack(eth *Ethereum, head uint64, rewindTo uint64) {
 		<-ch
 		rewind(eth, head, rewindTo)
 
-		eth.Miner().Start()
+		eth.Miner().Start(eth.etherbase)
 	} else {
 		rewind(eth, head, rewindTo)
 	}
 }
 
 func rewind(eth *Ethereum, head uint64, rewindTo uint64) {
+	log.Warn("Rewinding chain because it doesn't match the received milestone", "to", rewindTo)
 	err := eth.blockchain.SetHead(rewindTo)
 
 	if err != nil {

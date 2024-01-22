@@ -6,7 +6,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/consensus/bor"
-	"github.com/ethereum/go-ethereum/consensus/bor/heimdall"
 	"github.com/ethereum/go-ethereum/log"
 )
 
@@ -19,7 +18,7 @@ var (
 	// latest milestone from the local heimdall.
 	errMilestone = errors.New("failed to fetch latest milestone")
 
-	ErrNotInRejectedList = errors.New("MilestoneID not in rejected list")
+	ErrNotInRejectedList = errors.New("milestoneID doesn't exist in rejected list")
 )
 
 // fetchWhitelistCheckpoint fetches the latest checkpoint from it's local heimdall
@@ -36,8 +35,6 @@ func (h *ethHandler) fetchWhitelistCheckpoint(ctx context.Context, bor *bor.Bor,
 		log.Debug("Failed to fetch latest checkpoint for whitelisting", "err", err)
 		return blockNum, blockHash, errCheckpoint
 	}
-
-	log.Info("Got new checkpoint from heimdall", "start", checkpoint.StartBlock.Uint64(), "end", checkpoint.EndBlock.Uint64(), "rootHash", checkpoint.RootHash.String())
 
 	// Verify if the checkpoint fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the checkpoint. If not,
@@ -64,11 +61,6 @@ func (h *ethHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, 
 
 	// fetch latest milestone
 	milestone, err := bor.HeimdallClient.FetchMilestone(ctx)
-	if errors.Is(err, heimdall.ErrServiceUnavailable) {
-		log.Debug("Failed to fetch latest milestone for whitelisting", "err", err)
-		return num, hash, err
-	}
-
 	if err != nil {
 		log.Error("Failed to fetch latest milestone for whitelisting", "err", err)
 		return num, hash, errMilestone
@@ -76,8 +68,6 @@ func (h *ethHandler) fetchWhitelistMilestone(ctx context.Context, bor *bor.Bor, 
 
 	num = milestone.EndBlock.Uint64()
 	hash = milestone.Hash
-
-	log.Info("Got new milestone from heimdall", "start", milestone.StartBlock.Uint64(), "end", milestone.EndBlock.Uint64(), "hash", milestone.Hash.String())
 
 	// Verify if the milestone fetched can be added to the local whitelist entry or not
 	// If verified, it returns the hash of the end block of the milestone. If not,
@@ -98,13 +88,9 @@ func (h *ethHandler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (str
 
 	// fetch latest milestone
 	milestoneID, err := bor.HeimdallClient.FetchLastNoAckMilestone(ctx)
-	if errors.Is(err, heimdall.ErrServiceUnavailable) {
-		log.Debug("Failed to fetch latest no-ack milestone", "err", err)
-		return milestoneID, err
-	}
-
 	if err != nil {
 		log.Error("Failed to fetch latest no-ack milestone", "err", err)
+
 		return milestoneID, errMilestone
 	}
 
@@ -114,10 +100,6 @@ func (h *ethHandler) fetchNoAckMilestone(ctx context.Context, bor *bor.Bor) (str
 func (h *ethHandler) fetchNoAckMilestoneByID(ctx context.Context, bor *bor.Bor, milestoneID string) error {
 	// fetch latest milestone
 	err := bor.HeimdallClient.FetchNoAckMilestone(ctx, milestoneID)
-	if errors.Is(err, heimdall.ErrServiceUnavailable) {
-		log.Debug("Failed to fetch no-ack milestone by ID", "milestoneID", milestoneID, "err", err)
-		return err
-	}
 
 	// fixme: handle different types of errors
 	if errors.Is(err, ErrNotInRejectedList) {
